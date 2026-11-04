@@ -14,7 +14,7 @@ const RB_HOSTS = [
   "https://fr1.api.radio-browser.info",
 ];
 
-const UA = "KinoInstantAudio/1.0.5";
+const UA = "KinoInstantAudio/1.0.6";
 
 const SA_CODES = ["AR", "BO", "BR", "CL", "CO", "EC", "PY", "PE", "SR", "UY", "VE"];
 
@@ -247,14 +247,16 @@ function limitStations() {
 
 async function rbFetch(path) {
   var lastErr = null;
-  for (var i = 0; i < RB_HOSTS.length; i++) {
+  // Máx. 2 hosts: home debe responder < 20s
+  var maxHosts = Math.min(2, RB_HOSTS.length);
+  for (var i = 0; i < maxHosts; i++) {
     try {
       var r = await kino.fetch(RB_HOSTS[i] + path, {
         headers: {
           "User-Agent": UA,
           Accept: "application/json",
         },
-        timeoutMs: 12000,
+        timeoutMs: 8000,
       });
       if (!r.ok) {
         lastErr = "http " + r.status;
@@ -273,6 +275,27 @@ async function rbFetch(path) {
   throw kino.error("unavailable", "radio-browser " + (lastErr || "fail"), {
     userMessage: "No se pudo cargar el listado de radios. Intenta de nuevo.",
   });
+}
+
+/** Ejecuta promesas en lotes (Kino permite ~6 fetch en paralelo). */
+async function mapPool(items, concurrency, fn) {
+  var results = new Array(items.length);
+  var idx = 0;
+  async function worker() {
+    while (idx < items.length) {
+      var i = idx++;
+      try {
+        results[i] = await fn(items[i], i);
+      } catch (e) {
+        results[i] = null;
+      }
+    }
+  }
+  var n = Math.min(concurrency || 5, items.length || 1);
+  var workers = [];
+  for (var w = 0; w < n; w++) workers.push(worker());
+  await Promise.all(workers);
+  return results;
 }
 
 function cleanTitle(name) {
@@ -344,17 +367,17 @@ async function topStationsFromCodes(codes, perCountry, maxTotal) {
   var seen = {};
   perCountry = perCountry || 4;
   maxTotal = maxTotal || 16;
-  for (var k = 0; k < codes.length && all.length < maxTotal; k++) {
-    try {
-      var list = await fetchStationsByCountry(codes[k], 0, perCountry);
-      for (var m = 0; m < list.length && all.length < maxTotal; m++) {
-        var it = stationToLiveItem(list[m]);
-        if (!it || seen[it.id]) continue;
-        seen[it.id] = true;
-        all.push(it);
-      }
-    } catch (e) {
-      kino.log("stations " + codes[k], String(e));
+  var lists = await mapPool(codes, 5, function (code) {
+    return fetchStationsByCountry(code, 0, perCountry);
+  });
+  for (var k = 0; k < lists.length && all.length < maxTotal; k++) {
+    var list = lists[k];
+    if (!list || !list.length) continue;
+    for (var m = 0; m < list.length && all.length < maxTotal; m++) {
+      var it = stationToLiveItem(list[m]);
+      if (!it || seen[it.id]) continue;
+      seen[it.id] = true;
+      all.push(it);
     }
   }
   return all;
@@ -372,68 +395,65 @@ async function topStationsFromCodes(codes, perCountry, maxTotal) {
 export async function home() {
   var prefer = kino.config.get("preferContinent") || "SA";
   var rows = [];
-  var previewPerCountry = 8;
+  var previewPerCountry = 6;
 
-  // Populares Sudamérica (siempre)
-  try {
-    var popular = await topStationsFromCodes(SA_CODES, 3, 14);
-    if (popular.length) {
-      rows.push({
-        id: "row-popular",
-        title: "Más escuchadas · Sudamérica",
-        items: popular,
-        genre: "musica",
-      });
-    }
-  } catch (e) {
-    kino.log("home popular", String(e));
-  }
-
-  // Continente preferido: una fila por país (Sudamérica por defecto)
-  // Así no superamos el límite de ~60 fetch de Kino
+  // Un solo continente en detalle (por defecto Sudamérica) para no superar 20s
   var focusId = prefer === "all" ? "SA" : prefer;
   var focus = continentById(focusId) || continentById("SA");
-  if (focus) {
-    for (var j = 0; j < focus.countries.length; j++) {
-      var c = focus.countries[j];
-      try {
-        var items = await stationsAsLiveItems(c.code, 0, previewPerCountry);
-        if (!items.length) continue;
-        rows.push({
-          id: "row-" + c.code,
-          title: focus.title + " · " + c.name,
-          items: items,
-          ref: "country:" + c.code,
-          genre: "musica",
-        });
-      } catch (e) {
-        kino.log("home " + c.code, String(e));
-      }
+  if (!focus) return rows;
+
+  // Todas las peticiones del continente en paralelo (lotes de 5)
+  var codes = focus.countries.map(function (c) {
+    return c.code;
+  });
+  var lists = await mapPool(codes, 5, function (code) {
+    return fetchStationsByCountry(code, 0, previewPerCountry);
+  });
+
+  // Populares = mezcla de las primeras de cada país
+  var popular = [];
+  var seen = {};
+  for (var i = 0; i < lists.length && popular.length < 12; i++) {
+    var list = lists[i];
+    if (!list || !list.length) continue;
+    for (var m = 0; m < Math.min(2, list.length) && popular.length < 12; m++) {
+      var it = stationToLiveItem(list[m]);
+      if (!it || seen[it.id]) continue;
+      seen[it.id] = true;
+      popular.push(it);
     }
   }
-
-  // Resto de continentes: una sola fila con emisoras top (sin desglose por país)
-  for (var i = 0; i < CONTINENTS.length; i++) {
-    var cont = CONTINENTS[i];
-    if (cont.id === focusId) continue;
-    try {
-      var codes = cont.countries.map(function (x) {
-        return x.code;
-      });
-      var mixed = await topStationsFromCodes(codes, 2, 10);
-      if (!mixed.length) continue;
-      rows.push({
-        id: "row-" + cont.id,
-        title: cont.title,
-        items: mixed,
-        ref: "continent:" + cont.id,
-        genre: "musica",
-      });
-    } catch (e) {
-      kino.log("home " + cont.id, String(e));
-    }
+  if (popular.length) {
+    rows.push({
+      id: "row-popular",
+      title: "Más escuchadas · " + focus.title,
+      items: popular,
+      genre: "musica",
+    });
   }
 
+  // Una fila por país (datos ya descargados, sin más fetch)
+  for (var j = 0; j < focus.countries.length; j++) {
+    var c = focus.countries[j];
+    var raw = lists[j];
+    if (!raw || !raw.length) continue;
+    var items = [];
+    for (var k = 0; k < raw.length; k++) {
+      var st = stationToLiveItem(raw[k]);
+      if (st) items.push(st);
+    }
+    if (!items.length) continue;
+    rows.push({
+      id: "row-" + c.code,
+      title: focus.title + " · " + c.name,
+      items: items,
+      ref: "country:" + c.code,
+      genre: "musica",
+    });
+  }
+
+  // Otros continentes: no se cargan en home (evita timeout 20s).
+  // Están en pestaña En vivo y en browse(continent:XX).
   return rows;
 }
 
