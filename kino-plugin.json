@@ -1,7 +1,7 @@
 {
   "id": "instant-audio",
   "name": "Instant Audio",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "apiVersion": 6,
   "entry": "plugin.js",
   "description": "Radios en vivo del mundo organizadas por continente y país. Emisoras reproducibles en teléfono y TV, sin anuncios.",
@@ -26,7 +26,6 @@
     "search",
     "home",
     "browse",
-    "episodes",
     "resolve",
     "channels"
   ],
