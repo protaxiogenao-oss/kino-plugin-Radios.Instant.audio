@@ -1,0 +1,75 @@
+{
+  "id": "instant-audio",
+  "name": "Instant Audio",
+  "version": "1.0.1",
+  "apiVersion": 6,
+  "entry": "plugin.js",
+  "description": "Radios en vivo del mundo organizadas por continente y país. Emisoras reproducibles en teléfono y TV, sin anuncios.",
+  "author": "Hotaru Yume",
+  "creator": "hotaruyume",
+  "homepage": "https://instant.audio",
+  "hosts": [
+    "de1.api.radio-browser.info",
+    "de2.api.radio-browser.info",
+    "nl1.api.radio-browser.info",
+    "at1.api.radio-browser.info",
+    "fr1.api.radio-browser.info",
+    "api.radio-browser.info",
+    "*.radio-browser.info",
+    "cdn.instant.audio",
+    "flagcdn.com",
+    "*.flagcdn.com"
+  ],
+  "streamHosts": "any",
+  "liveStreamHosts": "any",
+  "capabilities": [
+    "search",
+    "home",
+    "browse",
+    "resolve",
+    "channels"
+  ],
+  "categories": [
+    "radio",
+    "live"
+  ],
+  "color": "#0EA5E9",
+  "icon": "icon.png",
+  "theme": {
+    "accent": "#0EA5E9",
+    "onAccent": "#FFFFFF",
+    "background": "#0B1220",
+    "surface": "#111827",
+    "highlight": "#38BDF8"
+  },
+  "settings": [
+    {
+      "key": "preferContinent",
+      "label": "Continente preferido en Inicio",
+      "type": "select",
+      "default": "SA",
+      "options": [
+        { "value": "all", "label": "Todos" },
+        { "value": "SA", "label": "Sudamérica" },
+        { "value": "NA", "label": "Norteamérica" },
+        { "value": "CA", "label": "Centroamérica" },
+        { "value": "EU", "label": "Europa" },
+        { "value": "AF", "label": "África" },
+        { "value": "AS", "label": "Asia" },
+        { "value": "OC", "label": "Oceanía" }
+      ]
+    },
+    {
+      "key": "limitPerCountry",
+      "label": "Radios por país (máx.)",
+      "type": "select",
+      "default": "40",
+      "options": [
+        { "value": "20", "label": "20" },
+        { "value": "40", "label": "40" },
+        { "value": "60", "label": "60" },
+        { "value": "100", "label": "100" }
+      ]
+    }
+  ]
+}
