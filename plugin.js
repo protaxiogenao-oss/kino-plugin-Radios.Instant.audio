@@ -14,7 +14,7 @@ const RB_HOSTS = [
   "https://fr1.api.radio-browser.info",
 ];
 
-const UA = "KinoInstantAudio/1.0.4";
+const UA = "KinoInstantAudio/1.0.5";
 
 const SA_CODES = ["AR", "BO", "BR", "CL", "CO", "EC", "PY", "PE", "SR", "UY", "VE"];
 
@@ -158,32 +158,84 @@ function countryByCode(code) {
   return null;
 }
 
-/** Bandera horizontal 16:9 (640×360). */
+/**
+ * Bandera ancha (aprox. 3:2 / horizontal). flagcdn no ofrece 16:9 exacto;
+ * w1280 se ve horizontal en tarjetas live.
+ */
 function flagPoster(code) {
-  return "https://flagcdn.com/640x360/" + String(code || "").toLowerCase() + ".png";
+  var c = String(code || "un").toLowerCase();
+  if (!/^[a-z]{2}$/.test(c)) c = "un";
+  return "https://flagcdn.com/w1280/" + c + ".png";
+}
+
+function isUsableImageUrl(u) {
+  if (!u || typeof u !== "string") return false;
+  u = u.trim();
+  if (!/^https?:\/\//i.test(u)) return false;
+  var low = u.toLowerCase();
+  // píxeles de tracking / vacíos
+  if (
+    low.indexOf("1x1") >= 0 ||
+    low.indexOf("pixel.gif") >= 0 ||
+    low.indexOf("pixel.png") >= 0 ||
+    low.indexOf("/blank.") >= 0 ||
+    low.indexOf("about:blank") >= 0
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function domainFromUrl(u) {
+  if (!u) return null;
+  var m = String(u).match(/^https?:\/\/([^\/\?:#]+)/i);
+  if (!m) return null;
+  return m[1].replace(/^www\./i, "").toLowerCase();
+}
+
+/** Intenta subir favicons de WordPress 32x32 → 180x180. */
+function upgradeLogoUrl(u) {
+  if (!u) return u;
+  return u
+    .replace(/-32x32(\.[a-z]+)/i, "-180x180$1")
+    .replace(/-16x16(\.[a-z]+)/i, "-180x180$1")
+    .replace(/-48x48(\.[a-z]+)/i, "-192x192$1")
+    .replace(/\/favicon\.ico$/i, "/apple-touch-icon.png");
 }
 
 /**
- * Poster de emisora: logo si es usable; si no, bandera 16:9.
- * Evitamos favicons 1×1 o muy pequeños (suelen verse mal en horizontal).
+ * Poster de emisora (prioridad):
+ * 1) favicon de Radio Browser (png/jpg/ico/http/https)
+ * 2) favicon Google 128px del dominio homepage/stream
+ * 3) DuckDuckGo icons
+ * 4) bandera ancha del país
+ *
+ * backdrop siempre bandera horizontal para reforzar 16:9 en la UI live.
  */
 function stationPoster(st) {
-  var logo = st.favicon && /^https?:\/\//i.test(st.favicon) ? st.favicon : null;
-  if (logo) {
-    var low = logo.toLowerCase();
-    // Favicons genéricos / tracking suelen ser basura visual
-    if (
-      low.indexOf("google.com/s2/favicons") >= 0 ||
-      low.indexOf("favicon.ico") >= 0 ||
-      low.indexOf("1x1") >= 0
-    ) {
-      logo = null;
-    }
+  var raw = st.favicon ? String(st.favicon).trim() : "";
+  if (raw.indexOf("//") === 0) raw = "https:" + raw;
+  if (isUsableImageUrl(raw)) {
+    return upgradeLogoUrl(raw);
   }
-  // Para live, Kino usa el poster de forma más ancha; preferimos bandera 16:9
-  // si no hay logo de calidad. Si hay logo, lo usamos (muchas emisoras tienen arte cuadrado;
-  // el contenedor live lo muestra mejor que el de series).
-  return logo || flagPoster(st.countrycode);
+  var domain =
+    domainFromUrl(st.homepage) ||
+    domainFromUrl(st.url_resolved) ||
+    domainFromUrl(st.url);
+  if (domain) {
+    // Google favicon service (128px)
+    return (
+      "https://www.google.com/s2/favicons?domain=" +
+      encodeURIComponent(domain) +
+      "&sz=128"
+    );
+  }
+  return flagPoster(st.countrycode);
+}
+
+function stationBackdrop(st) {
+  // Siempre horizontal / ancho para tarjetas live
+  return flagPoster(st.countrycode);
 }
 
 function limitStations() {
@@ -246,8 +298,7 @@ function stationToLiveItem(st) {
     title: title,
     kind: "live",
     poster: stationPoster(st),
-    // backdrop horizontal refuerza 16:9 en tarjetas live
-    backdrop: flagPoster(st.countrycode),
+    backdrop: stationBackdrop(st),
     overview: [st.country, st.state, st.tags].filter(Boolean).join(" · ").slice(0, 300) || undefined,
     badges: st.bitrate ? [String(st.bitrate) + " kbps"] : undefined,
   };

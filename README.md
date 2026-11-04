@@ -1,18 +1,15 @@
 # Instant Audio – plugin de Kino
 
-Radios en vivo: **continente → país → emisoras**.
+Radios en vivo: continente → país → emisoras. Todo `live` (no se guarda en Mi biblioteca).
 
-## Organización
+## Miniaturas
 
-- **Más escuchadas · Sudamérica** → reproducción directa
-- **Sudamérica · Argentina**, **Sudamérica · Colombia**, … → radios del país
-- Otros continentes en filas propias
-- Pestaña **En vivo** con categorías por país
+1. Logo de la emisora (Radio Browser favicon, png/jpg/ico)
+2. Si falta → favicon Google del dominio
+3. Si falta → bandera ancha del país (horizontal)
 
-Todo es `kind: "live"`: **no se guarda en Mi biblioteca**.
-
-Miniaturas en **horizontal 16:9** (banderas 640×360 + logos de emisoras).
+`backdrop` siempre es la bandera ancha para aspecto horizontal en tarjetas live.
 
 ## Instalar
 
-Repo público + topic `kino-plugin`. En Kino: Ajustes → Plugins → `usuario/repo`.
+Repo GitHub con topic `kino-plugin` → en Kino: Ajustes → Plugins → `usuario/repo`.
