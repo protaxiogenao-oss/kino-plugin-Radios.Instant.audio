@@ -1,7 +1,7 @@
 {
   "id": "instant-audio",
   "name": "Instant Audio",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "apiVersion": 6,
   "entry": "plugin.js",
   "description": "Radios en vivo del mundo organizadas por continente y país. Emisoras reproducibles en teléfono y TV, sin anuncios.",
@@ -26,6 +26,7 @@
     "search",
     "home",
     "browse",
+    "episodes",
     "resolve",
     "channels"
   ],
@@ -49,38 +50,14 @@
       "type": "select",
       "default": "SA",
       "options": [
-        {
-          "value": "all",
-          "label": "Todos"
-        },
-        {
-          "value": "SA",
-          "label": "Sudamérica"
-        },
-        {
-          "value": "NA",
-          "label": "Norteamérica"
-        },
-        {
-          "value": "CA",
-          "label": "Centroamérica"
-        },
-        {
-          "value": "EU",
-          "label": "Europa"
-        },
-        {
-          "value": "AF",
-          "label": "África"
-        },
-        {
-          "value": "AS",
-          "label": "Asia"
-        },
-        {
-          "value": "OC",
-          "label": "Oceanía"
-        }
+        { "value": "all", "label": "Todos" },
+        { "value": "SA", "label": "Sudamérica" },
+        { "value": "NA", "label": "Norteamérica" },
+        { "value": "CA", "label": "Centroamérica" },
+        { "value": "EU", "label": "Europa" },
+        { "value": "AF", "label": "África" },
+        { "value": "AS", "label": "Asia" },
+        { "value": "OC", "label": "Oceanía" }
       ]
     },
     {
@@ -89,22 +66,10 @@
       "type": "select",
       "default": "40",
       "options": [
-        {
-          "value": "20",
-          "label": "20"
-        },
-        {
-          "value": "40",
-          "label": "40"
-        },
-        {
-          "value": "60",
-          "label": "60"
-        },
-        {
-          "value": "100",
-          "label": "100"
-        }
+        { "value": "20", "label": "20" },
+        { "value": "40", "label": "40" },
+        { "value": "60", "label": "60" },
+        { "value": "100", "label": "100" }
       ]
     }
   ]

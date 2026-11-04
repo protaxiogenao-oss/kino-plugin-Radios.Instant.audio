@@ -1,10 +1,9 @@
 /// <reference path="./kino.d.ts" />
 
 /**
- * Instant Audio – radios en vivo por continente / país.
- * Fuente: Radio Browser (streams limpios, sin anuncios).
- * Navegación: continente → emisoras (Home / Ver más).
- * Países en pestaña En vivo y como filtro de browse.
+ * Instant Audio – jerarquía: continente → país → lista de radios → reproducción.
+ * País = series (abre listado). Cada radio = episodio con ref station: → resolve.
+ * Fuente: Radio Browser (streams limpios).
  */
 
 const RB_HOSTS = [
@@ -15,12 +14,10 @@ const RB_HOSTS = [
   "https://fr1.api.radio-browser.info",
 ];
 
-const UA = "KinoInstantAudio/1.0.2";
+const UA = "KinoInstantAudio/1.0.3";
 
-/** Códigos ISO de Sudamérica (populares + filas prioritarias) */
 const SA_CODES = ["AR", "BO", "BR", "CL", "CO", "EC", "PY", "PE", "SR", "UY", "VE"];
 
-/** Continentes y países (misma organización que instant.audio) */
 const CONTINENTS = [
   {
     id: "SA",
@@ -148,6 +145,19 @@ function continentById(id) {
   return null;
 }
 
+function countryByCode(code) {
+  code = String(code || "").toUpperCase();
+  for (var i = 0; i < CONTINENTS.length; i++) {
+    var list = CONTINENTS[i].countries;
+    for (var j = 0; j < list.length; j++) {
+      if (list[j].code === code) {
+        return { country: list[j], continent: CONTINENTS[i] };
+      }
+    }
+  }
+  return null;
+}
+
 function flagUrl(code) {
   return "https://flagcdn.com/w640/" + String(code || "").toLowerCase() + ".png";
 }
@@ -197,27 +207,40 @@ function cleanTitle(name) {
     .slice(0, 200);
 }
 
-/** Solo emisoras reproducibles (kind live + ref station:) */
-function stationToItem(st) {
+/** País como series: al abrirlo se listan las emisoras (episodes). */
+function countryToSeriesItem(c, continentTitle) {
+  return {
+    id: "co-" + c.code,
+    ref: "country:" + c.code,
+    title: c.name,
+    kind: "series",
+    poster: flagUrl(c.code),
+    overview: continentTitle
+      ? "Radios de " + c.name + " · " + continentTitle
+      : "Radios de " + c.name,
+  };
+}
+
+/** Emisora reproducible (Home populares / search / live channels). */
+function stationToLiveItem(st) {
   var id = st.stationuuid || st.changeuuid;
   if (!id) return null;
   var title = cleanTitle(st.name);
   if (!title) return null;
   var logo = st.favicon && /^https?:\/\//i.test(st.favicon) ? st.favicon : null;
-  var poster = logo || flagUrl(st.countrycode);
   return {
     id: "st-" + id,
     ref: "station:" + id,
     title: title,
     kind: "live",
-    poster: poster,
+    poster: logo || flagUrl(st.countrycode),
     overview: [st.country, st.state, st.tags].filter(Boolean).join(" · ").slice(0, 300) || undefined,
     badges: st.bitrate ? [String(st.bitrate) + " kbps"] : undefined,
   };
 }
 
 function stationToChannel(st, categoryId, number) {
-  var it = stationToItem(st);
+  var it = stationToLiveItem(st);
   if (!it) return null;
   return {
     id: it.id,
@@ -229,8 +252,7 @@ function stationToChannel(st, categoryId, number) {
   };
 }
 
-/** Estaciones de un país (paginado) */
-async function stationsByCountry(code, offset, limit) {
+async function fetchStationsByCountry(code, offset, limit) {
   var path =
     "/json/stations/bycountrycodeexact/" +
     encodeURIComponent(code) +
@@ -239,33 +261,19 @@ async function stationsByCountry(code, offset, limit) {
     "&offset=" +
     offset;
   var list = await rbFetch(path);
-  var items = [];
-  if (Array.isArray(list)) {
-    for (var j = 0; j < list.length; j++) {
-      var it = stationToItem(list[j]);
-      if (it) items.push(it);
-    }
-  }
-  return items;
+  return Array.isArray(list) ? list : [];
 }
 
-/** Top estaciones de varios países (p. ej. un continente) */
 async function topStationsFromCodes(codes, perCountry, maxTotal) {
   var all = [];
   var seen = {};
-  perCountry = perCountry || 6;
-  maxTotal = maxTotal || 30;
+  perCountry = perCountry || 4;
+  maxTotal = maxTotal || 16;
   for (var k = 0; k < codes.length && all.length < maxTotal; k++) {
     try {
-      var list = await rbFetch(
-        "/json/stations/bycountrycodeexact/" +
-          encodeURIComponent(codes[k]) +
-          "?hidebroken=true&order=clickcount&reverse=true&limit=" +
-          perCountry
-      );
-      if (!Array.isArray(list)) continue;
+      var list = await fetchStationsByCountry(codes[k], 0, perCountry);
       for (var m = 0; m < list.length && all.length < maxTotal; m++) {
-        var it = stationToItem(list[m]);
+        var it = stationToLiveItem(list[m]);
         if (!it || seen[it.id]) continue;
         seen[it.id] = true;
         all.push(it);
@@ -278,18 +286,18 @@ async function topStationsFromCodes(codes, perCountry, maxTotal) {
 }
 
 /* ───────── home ─────────
- * Cada fila de continente muestra emisoras (live), no países.
- * Así al tocar se reproduce; "Ver más" usa ref → browse.
- * Los países viven en En vivo y en browse(country:XX).
+ * Fila 1: Más escuchadas · Sudamérica (emisoras live, toque = play)
+ * Filas siguientes: un continente → tarjetas de países (series)
+ *   toque país = lista de radios (episodes)
  */
 
 export async function home() {
   var prefer = kino.config.get("preferContinent") || "SA";
   var rows = [];
 
-  // Populares de Sudamérica (no mundiales)
+  // Populares de Sudamérica (reproducción directa)
   try {
-    var popular = await topStationsFromCodes(SA_CODES, 4, 16);
+    var popular = await topStationsFromCodes(SA_CODES, 3, 14);
     if (popular.length) {
       rows.push({
         id: "row-popular",
@@ -299,7 +307,7 @@ export async function home() {
       });
     }
   } catch (e) {
-    kino.log("home popular SA failed", String(e));
+    kino.log("home popular", String(e));
   }
 
   var ordered = CONTINENTS.slice();
@@ -311,87 +319,118 @@ export async function home() {
     });
   }
 
-  // Una fila por continente con emisoras reales (kind live)
+  // Continente → países (series)
   for (var i = 0; i < ordered.length; i++) {
     var cont = ordered[i];
-    var codes = cont.countries.map(function (c) {
-      return c.code;
+    var items = cont.countries.map(function (c) {
+      return countryToSeriesItem(c, cont.title);
     });
-    try {
-      var items = await topStationsFromCodes(codes, 3, 12);
-      if (!items.length) continue;
-      rows.push({
-        id: "row-" + cont.id,
-        title: cont.title,
-        items: items,
-        ref: "continent:" + cont.id,
-        genre: "musica",
-      });
-    } catch (e) {
-      kino.log("home " + cont.id, String(e));
-    }
+    rows.push({
+      id: "row-" + cont.id,
+      title: cont.title,
+      items: items,
+      ref: "continent:" + cont.id,
+      genre: "musica",
+    });
   }
 
   return rows;
 }
 
 /* ───────── browse ─────────
- * continent:XX → emisoras del continente
- * country:XX  → emisoras del país
+ * continent:XX → lista de países del continente
+ * country:XX  → emisoras del país (como live items, por si se llega desde Ver más)
  */
 
 export async function browse(ref, cursor) {
   if (!ref) return { items: [] };
 
-  var limit = limitStations();
-  var offset = 0;
-  if (cursor) {
-    var n = parseInt(cursor, 10);
-    if (!isNaN(n) && n > 0) offset = n;
-  }
-
   if (ref.indexOf("continent:") === 0) {
     var cid = ref.slice("continent:".length);
     var cont = continentById(cid);
     if (!cont) return { items: [] };
-
-    var codes = cont.countries.map(function (c) {
-      return c.code;
-    });
-    var batch = Math.max(limit, 20);
-    var gathered = [];
-    var seen = {};
-    var countryIdx = 0;
-    var per = Math.max(8, Math.ceil(batch / Math.max(1, codes.length)));
-
-    while (gathered.length < offset + limit && countryIdx < codes.length * 3) {
-      var code = codes[countryIdx % codes.length];
-      var pageOff = Math.floor(countryIdx / codes.length) * per;
-      try {
-        var chunk = await stationsByCountry(code, pageOff, per);
-        for (var i = 0; i < chunk.length; i++) {
-          if (seen[chunk[i].id]) continue;
-          seen[chunk[i].id] = true;
-          gathered.push(chunk[i]);
-        }
-      } catch (e) {}
-      countryIdx++;
-      if (countryIdx > codes.length * 5) break;
-    }
-
-    var page = gathered.slice(offset, offset + limit);
-    var next = page.length >= limit ? String(offset + limit) : undefined;
-    return { items: page, next: next };
+    return {
+      items: cont.countries.map(function (c) {
+        return countryToSeriesItem(c, cont.title);
+      }),
+    };
   }
 
   if (ref.indexOf("country:") === 0) {
-    var ccode = ref.slice("country:".length).toUpperCase();
-    var items = await stationsByCountry(ccode, offset, limit);
-    var nextC = items.length >= limit ? String(offset + limit) : undefined;
-    return { items: items, next: nextC };
+    var code = ref.slice("country:".length).toUpperCase();
+    var limit = limitStations();
+    var offset = 0;
+    if (cursor) {
+      var n = parseInt(cursor, 10);
+      if (!isNaN(n) && n > 0) offset = n;
+    }
+    var list = await fetchStationsByCountry(code, offset, limit);
+    var items = [];
+    for (var j = 0; j < list.length; j++) {
+      var it = stationToLiveItem(list[j]);
+      if (it) items.push(it);
+    }
+    var next = items.length >= limit ? String(offset + limit) : undefined;
+    return { items: items, next: next };
   }
 
   return { items: [] };
+}
+
+/* ───────── episodes ─────────
+ * country:XX → lista de radios del país (una “temporada”).
+ * Cada episodio tiene ref station:uuid → resolve.
+ */
+
+export async function episodes(ref) {
+  if (!ref || ref.indexOf("country:") !== 0) {
+    throw kino.error("not_found", "episodes ref", {
+      userMessage: "País no encontrado.",
+    });
+  }
+
+  var code = ref.slice("country:".length).toUpperCase();
+  var info = countryByCode(code);
+  var name = info ? info.country.name : code;
+  var poster = flagUrl(code);
+  var limit = limitStations();
+
+  var list = await fetchStationsByCountry(code, 0, limit);
+  var episodes = [];
+  for (var i = 0; i < list.length; i++) {
+    var st = list[i];
+    var id = st.stationuuid || st.changeuuid;
+    if (!id) continue;
+    var title = cleanTitle(st.name);
+    if (!title) continue;
+    var logo = st.favicon && /^https?:\/\//i.test(st.favicon) ? st.favicon : poster;
+    episodes.push({
+      season: 1,
+      number: i + 1,
+      ref: "station:" + id,
+      title: title,
+      still: logo,
+      overview: [st.state, st.tags, st.bitrate ? st.bitrate + " kbps" : ""]
+        .filter(Boolean)
+        .join(" · ")
+        .slice(0, 300) || undefined,
+    });
+  }
+
+  if (!episodes.length) {
+    throw kino.error("unavailable", "no stations", {
+      userMessage: "No hay emisoras disponibles para " + name + " ahora.",
+    });
+  }
+
+  return {
+    series: {
+      title: name,
+      poster: poster,
+      overview: "Emisoras de " + name + (info ? " · " + info.continent.title : ""),
+    },
+    episodes: episodes,
+  };
 }
 
 /* ───────── search ───────── */
@@ -400,29 +439,44 @@ export async function search(query) {
   var q = (query && query.q ? String(query.q) : "").trim();
   if (!q || q.length < 2) return [];
 
+  // Si coincide con un país, devolver el país como series
+  var qLower = q.toLowerCase();
+  var countryHits = [];
+  for (var i = 0; i < CONTINENTS.length; i++) {
+    for (var j = 0; j < CONTINENTS[i].countries.length; j++) {
+      var c = CONTINENTS[i].countries[j];
+      if (c.name.toLowerCase().indexOf(qLower) >= 0 || c.code.toLowerCase() === qLower) {
+        countryHits.push(countryToSeriesItem(c, CONTINENTS[i].title));
+      }
+    }
+  }
+
   var path =
     "/json/stations/search?name=" +
     encodeURIComponent(q) +
-    "&hidebroken=true&order=clickcount&reverse=true&limit=40";
+    "&hidebroken=true&order=clickcount&reverse=true&limit=30";
   var list = await rbFetch(path);
-  var items = [];
+  var items = countryHits.slice();
   if (Array.isArray(list)) {
-    for (var i = 0; i < list.length; i++) {
-      var it = stationToItem(list[i]);
+    for (var k = 0; k < list.length; k++) {
+      var it = stationToLiveItem(list[k]);
       if (it) items.push(it);
     }
   }
   if (kino.rank && typeof kino.rank.filterRelevant === "function") {
     try {
-      items = kino.rank.filterRelevant(items, q);
+      // No filtrar los países; solo las emisoras
+      var stations = items.filter(function (x) {
+        return x.kind === "live";
+      });
+      var filtered = kino.rank.filterRelevant(stations, q);
+      items = countryHits.concat(filtered);
     } catch (e) {}
   }
   return items;
 }
 
-/* ───────── resolve ─────────
- * Solo refs station:<uuid>. country:/continent: no deben llegar aquí.
- */
+/* ───────── resolve ───────── */
 
 export async function resolve(ref) {
   if (!ref || typeof ref !== "string") {
@@ -433,7 +487,7 @@ export async function resolve(ref) {
 
   if (ref.indexOf("country:") === 0 || ref.indexOf("continent:") === 0) {
     throw kino.error("not_found", "ref container", {
-      userMessage: "Elige una emisora de la lista.",
+      userMessage: "Abre el país para ver sus emisoras.",
     });
   }
 
@@ -522,8 +576,8 @@ export async function resolve(ref) {
   return stream;
 }
 
-/* ───────── channels (pestaña En vivo) ─────────
- * Categorías = continentes + países. Al abrir un país se listan emisoras.
+/* ───────── channels (En vivo) ─────────
+ * Continentes y países como categorías; canales = emisoras live.
  */
 
 export async function liveCategories() {
@@ -539,7 +593,7 @@ export async function liveCategories() {
       var c = cont.countries[j];
       cats.push({
         id: "cat-co-" + c.code,
-        title: c.name,
+        title: cont.title + " · " + c.name,
         country: c.code,
         genre: "musica",
       });
@@ -560,20 +614,11 @@ export async function liveChannels({ categoryId, cursor }) {
 
   if (categoryId.indexOf("cat-co-") === 0) {
     var code = categoryId.slice("cat-co-".length).toUpperCase();
-    var list = await rbFetch(
-      "/json/stations/bycountrycodeexact/" +
-        encodeURIComponent(code) +
-        "?hidebroken=true&order=clickcount&reverse=true&limit=" +
-        limit +
-        "&offset=" +
-        offset
-    );
+    var list = await fetchStationsByCountry(code, offset, limit);
     var items = [];
-    if (Array.isArray(list)) {
-      for (var j = 0; j < list.length; j++) {
-        var ch = stationToChannel(list[j], categoryId, offset + j + 1);
-        if (ch) items.push(ch);
-      }
+    for (var j = 0; j < list.length; j++) {
+      var ch = stationToChannel(list[j], categoryId, offset + j + 1);
+      if (ch) items.push(ch);
     }
     var next = items.length >= limit ? String(offset + limit) : undefined;
     return { items: items, next: next };
@@ -586,7 +631,7 @@ export async function liveChannels({ categoryId, cursor }) {
     var codes = cont.countries.map(function (c) {
       return c.code;
     });
-    var stations = await topStationsFromCodes(codes, 5, offset || 40);
+    var stations = await topStationsFromCodes(codes, 5, Math.max(offset + limit, 40));
     var slice = stations.slice(offset, offset + limit);
     var channels = [];
     for (var i = 0; i < slice.length; i++) {
